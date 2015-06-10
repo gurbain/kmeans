@@ -93,7 +93,10 @@ float** mpi_read(int       isBinaryFile,  /* flag: 0 or 1 */
     }
     else { /* ASCII format: let proc 0 read and distribute to others */
         if (rank == 0) {
-            objects = file_read(0, filename, numObjs, numCoords);
+			    /* read data points from file ------------------------------------------*/
+			file_read_head(0, filename, numObjs, numCoords);
+			objects = file_read_block(0, filename, *numObjs, *numCoords);
+			file_read_close(isBinaryFile);
             if (objects == NULL) *numObjs = -1;
         }
 

@@ -65,13 +65,15 @@ inline void checkLastCudaError() {
 #endif
 
 float** omp_kmeans(int, float**, int, int, int, float, int*);
-float** seq_kmeans(float**, int, int, int, float, int*, int*);
-float** cuda_kmeans(float**, int, int, int, float, int*, int*);
+float** seq_kmeans(float**, int, int, int, float **, float, int*, int*);
+float** cuda_kmeans(float**, int, int, int, float **, float, int*, int*);
 
-float** file_read(int, char*, int*, int*);
+int 	file_read_head(int, char*, int*, int*);
+float** file_read_block(int, char*, int, int);
+int  	file_read_close(int);
 int     file_write(char*, int, int, int, float**, int*);
 
-
+int     graph_kmean(float*, float*, int, float*, float*, int, int*, float);
 double  wtime(void);
 
 extern int _debug;

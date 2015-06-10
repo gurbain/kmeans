@@ -1,0 +1,112 @@
+#!/bin/bash
+# vim:set ts=8 sw=4 sts=4 et:
+
+# Copyright (c) 2011 Serban Giuroiu
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+# ------------------------------------------------------------------------------
+
+set -e
+declare seq_CPU seq_Time seq_MEM omp_CPU omp_Time omp_MEM cuda_CPU cuda_time cuda_MEM
+
+# Launch the k-mean and get stat with pidstat
+perfStat() {
+    # inout files and variables
+    mkfifo fileRes
+    fileIN=$(mktemp)
+    fileStat=$(mktemp)
+    prefix=$1
+    name=${prefix}_main
+
+    # Start pidstat
+    ./pidstat -C $name -r -u -p ALL 1 1> $fileStat 2> $fileStat &
+    statPID=$!
+    sleep 1
+
+    # Start kmean
+    ./$name -o -b -n $2 -i Image_data/$3 < $fileIN > fileRes  &
+    # gprof ./$name > profiles/$prefix-profile-$2.txt
+    mainPID=$!
+
+    # Get kmean process line by line
+    while read -r line
+    do
+        # When finished, kill pidstat and get stat
+        if [ "$line" = "Process finished. Press ENTER to continue" ]; then
+            kill -INT $statPID
+            sleep 0.1
+            echo 'a' > fileIN
+            Time=$(cat $fileRes | grep 'Computation' | awk '{print $4}')			
+            Stat=($(cat $fileStat | grep 'Average'))
+            CPU=${Stat[15]}
+            MEM=${Stat[34]}
+            echo "$name $pid: CPU $CPU MEM $MEM TIME $Time" 
+        fi
+    done < fileRes
+
+    # Set global variables
+    eval ${prefix}_CPU=$CPU
+    eval ${prefix}_MEM=$MEM
+    eval ${prefix}_Time=$Time
+
+    rm fileRes
+}
+
+# Input file
+input='c_test.bin'
+
+# Create a profiling dir
+mkdir -p profiles
+
+# Compile
+make seq omp cuda
+
+echo "--------------------------------------------------------------------------------"
+uptime
+echo "--------------------------------------------------------------------------------"
+
+# Start performance analysis
+for k in 2 4 8 16 32 64 128 256 512 1024 2048 4096 8192; do
+
+    # Launch sequential kmean and statistics
+    perfStat "seq" $k $input
+    mv Image_data/${input}.cluster_centres Image_data/${input}-$k.cluster_centres
+    mv Image_data/${input}.membership Image_data/${input}-$k.membership
+
+    # Launch OMP kmean and statistics 
+    perfStat "omp" $k $input
+
+    # Launch CUDA kmean and statistics
+    perfStat "cuda" $k $input
+
+    # Print statistics
+    speedup_Time=$(echo "scale=1; ${seq_Time} / ${cuda_Time}" | bc)
+    speedup_CPU=$(echo "scale=1; ${seq_CPU} / ${cuda_CPU}" | bc)
+    speedup_MEM=$(echo "scale=1; ${seq_MEM} / ${cuda_MEM}" | bc)
+    echo "k = $(printf "%3d" $k)  seqTime = ${seq_Time}s  ompTime = ${omp_Time}s  cudaTime = ${cuda_Time}s  speedup = ${speedup_Time}x"
+    echo "         seqCPU = ${seq_CPU}%  ompCPU = ${omp_CPU}%  cudaCPU = ${cuda_CPU}%  ratioCPU = ${speedup_CPU}x"
+    echo "         seqMEM = ${seq_MEM}%  ompMEM = ${omp_MEM}%  cudaMEM = ${cuda_MEM}%  ratioMEM = ${speedup_MEM}x"
+
+    # Assert results
+    # echo "Difference for k = $k" >> profiles/diff.out    
+    # diff Image_data/${input}-$k.cluster_centres Image_data/${input}.cluster_centres >> profiles/diff.out
+    # diff Image_data/${input}-$k.membership Image_data/${input}.membership >> profiles/diff.out
+
+done

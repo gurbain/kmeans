@@ -25,3 +25,5 @@ gmon.out
 profiles
 *.cluster_centres
 *.membership
+*.bin
+*.txt

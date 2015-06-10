@@ -45,7 +45,7 @@
 #include <sys/types.h>  /* open() */
 #include <sys/stat.h>
 #include <fcntl.h>
-#include <unistd.h>     /* getopt() */
+#include <getopt.h>
 
 int      _debug;
 #include "kmeans.h"
@@ -58,6 +58,8 @@ static void usage(char *argv0, float threshold) {
         "       -b             : input file is in binary format (default no)\n"
         "       -n num_clusters: number of clusters (K must > 1)\n"
         "       -t threshold   : threshold value (default %.4f)\n"
+		"       -s splitNumber : split the data into s block (default 1)\n"
+		"       -g             : display clustered data graph (default no)\n"
         "       -o             : output timing results (default no)\n"
         "       -d             : enable debug mode\n";
     fprintf(stderr, help, argv0, threshold);
@@ -71,38 +73,51 @@ int main(int argc, char **argv) {
     extern int     optind;
            int     i, j;
            int     isBinaryFile, is_output_timing;
+		   int     graph;
 
            int     numClusters, numCoords, numObjs;
            int    *membership;    /* [numObjs] */
            char   *filename;
-           float **objects;       /* [numObjs][numCoords] data objects */
+           float **objects;
            float **clusters;      /* [numClusters][numCoords] cluster center */
            float   threshold;
            double  timing, io_timing, clustering_timing;
            int     loop_iterations;
+		   
+		   int     splitNumber;
+		   int     iteration;
+		   float **clustersInit;
+		   int    *membershipIteration;
+		   int     lastObjsIteration;
 
     /* some default values */
     _debug           = 0;
+	graph			 = 0;
     threshold        = 0.001;
+	splitNumber		 = 1;
     numClusters      = 0;
     isBinaryFile     = 0;
     is_output_timing = 0;
     filename         = NULL;
 
-    while ( (opt=getopt(argc,argv,"p:i:n:t:abdo"))!= EOF) {
+    while ( (opt=getopt(argc,argv,"p:i:l:n:s:t:abdgo"))!= EOF) {
         switch (opt) {
             case 'i': filename=optarg;
                       break;
             case 'b': isBinaryFile = 1;
                       break;
-            case 't': threshold=atof(optarg);
+            case 't': threshold = atof(optarg);
                       break;
+			case 's': splitNumber = atoi(optarg);
+					  break;
             case 'n': numClusters = atoi(optarg);
                       break;
             case 'o': is_output_timing = 1;
                       break;
             case 'd': _debug = 1;
                       break;
+			case 'g': graph = 1;
+					  break;
             case '?': usage(argv[0], threshold);
                       break;
             default: usage(argv[0], threshold);
@@ -114,56 +129,150 @@ int main(int argc, char **argv) {
 
     if (is_output_timing) io_timing = wtime();
 
-    /* read data points from file ------------------------------------------*/
-    objects = file_read(isBinaryFile, filename, &numObjs, &numCoords);
-    if (objects == NULL) exit(1);
+    /* read number of points from file -------------------------------------*/
+    file_read_head(isBinaryFile, filename, &numObjs, &numCoords);
 
-    if (is_output_timing) {
+    /* membership: the cluster id for each data object */
+    membership = (int*) malloc(numObjs * sizeof(int));
+    assert(membership != NULL);
+	
+    /* initialize membership[] */
+    for (i=0; i<numObjs; i++) membership[i] = -1;
+	
+	/* initialize some other algorithm variables */
+	int numObjsIteration = numObjs / splitNumber;
+	malloc2D(objects, numObjsIteration, numCoords, float);
+    assert(objects != NULL);
+	malloc2D(clustersInit, numClusters, numCoords, float);
+    assert(clustersInit != NULL);
+	membershipIteration = (int*) malloc(numObjsIteration * sizeof(int));
+    assert(membershipIteration != NULL);
+
+    /* start the timer for the core computation -----------------------------*/
+	if (is_output_timing) {
         timing            = wtime();
         io_timing         = timing - io_timing;
         clustering_timing = timing;
     }
+    
+    /* initialize the cluster vector with random value ----------------------*/
+	objects = file_read_block(isBinaryFile, filename, numObjsIteration, numCoords);
+	for (i=0; i<numClusters; i++)
+        for (j=0; j<numCoords; j++)
+            clustersInit[i][j] = objects[rand()%numObjsIteration][rand()%numCoords];
+	
+	/* data splitting to accelerate the process and minimize memory usage ---*/
+	iteration = 0;
+	while ( (iteration * numObjsIteration) < (numObjs - numObjsIteration) ) {
+		printf ("[seq kmean] data block %i - number of objects %i\n", 
+				iteration + 1, numObjsIteration);
+		
+		// read data to clusterize
+		if (iteration != 0)
+			objects = file_read_block(isBinaryFile, filename, numObjsIteration, numCoords);
+		if (objects == NULL)
+			exit(1);
+		//memcpy(&objects[0][0], &objects[iteration * numObjsIteration][0],
+				//numObjsIteration * numCoords * sizeof(float));
+		
+	
+		// do clusterisation
+		clusters = seq_kmeans(objects, numCoords, numObjsIteration, numClusters,
+				clustersInit, threshold, membershipIteration, &loop_iterations);
+		
+		// save the results
+		memcpy(&membership[iteration * numObjsIteration], &membershipIteration[0],
+				numObjsIteration * sizeof(int));
+		clustersInit = clusters;
+		
+		iteration++;
+	};
+	
+	/* last iteration -----------------------------------------------------*/
+	lastObjsIteration = numObjs - numObjsIteration * iteration;
+	printf ("[seq kmean] data block %i - number of objects %i\n", 
+				iteration + 1, lastObjsIteration);
+	if (iteration != 0)
+		objects = file_read_block(isBinaryFile, filename, lastObjsIteration, numCoords);
+	if (objects == NULL)
+		exit(1);
 
-    /* start the timer for the core computation -----------------------------*/
-    /* membership: the cluster id for each data object */
-    membership = (int*) malloc(numObjs * sizeof(int));
-    assert(membership != NULL);
-
-    clusters = seq_kmeans(objects, numCoords, numObjs, numClusters, threshold,
-                          membership, &loop_iterations);
-
-    free(objects[0]);
-    free(objects);
-
-    if (is_output_timing) {
+	clusters = seq_kmeans(objects, numCoords, lastObjsIteration, numClusters,
+			clustersInit, threshold, membershipIteration, &loop_iterations);
+	memcpy(&membership[iteration * numObjsIteration], &membershipIteration[0],
+			lastObjsIteration * sizeof(int));
+	
+	
+	/* restart io timer ----------------------------------------------------*/
+	if (is_output_timing) {
         timing            = wtime();
         clustering_timing = timing - clustering_timing;
     }
+
+	/* free memory part 1 --------------------------------------------------*/
+	file_read_close(isBinaryFile);
+	free(objects[0]);
+	free(objects);
+	free(clustersInit[0]);
+	free(clustersInit);
+	free(membershipIteration);
 
     /* output: the coordinates of the cluster centres ----------------------*/
     file_write(filename, numClusters, numObjs, numCoords, clusters,
                membership);
 
-    free(membership);
-    free(clusters[0]);
-    free(clusters);
-
-    /*---- output performance numbers ---------------------------------------*/
+	/*- wait for key to continue -------------------------------------------*/
+	char buff;
+	printf("\n[seq kmean] Process finished. Press ENTER to continue");
+	scanf("%c", &buff);
+	
+	/*---- output performance numbers --------------------------------------*/
     if (is_output_timing) {
         io_timing += wtime() - timing;
-        printf("\nPerforming **** Regular Kmeans (sequential version) ****\n");
+        printf("\n[cuda kmean] Performances results for cuda k-mean\n");
 
-        printf("Input file:     %s\n", filename);
+		printf("------------------------------------------\n");
+        printf("input file:     %s\n", filename);
         printf("numObjs       = %d\n", numObjs);
         printf("numCoords     = %d\n", numCoords);
         printf("numClusters   = %d\n", numClusters);
         printf("threshold     = %.4f\n", threshold);
-
-        printf("Loop iterations    = %d\n", loop_iterations);
+		printf("number of blocks    = %d\n", splitNumber);
+        printf("loop iterations for last block    = %d\n\n", loop_iterations);
 
         printf("I/O time           = %10.4f sec\n", io_timing);
-        printf("Computation timing = %10.4f sec\n", clustering_timing);
+        printf("computation timing = %10.4f sec\n", clustering_timing);
+		printf("------------------------------------------\n\n");
     }
+    
+	/* display results if needed --------------------------------------------*/
+	if (graph) {
+		file_read_head(isBinaryFile, filename, &numObjs, &numCoords);
+		objects = file_read_block(isBinaryFile, filename, numObjs, numCoords);
+		file_read_close(isBinaryFile);
+		float* xObj = (float*)malloc(numObjs * sizeof(float));
+		float* yObj = (float*)malloc(numObjs * sizeof(float));
+		float* xClu = (float*)malloc(numClusters * sizeof(float));
+		float* yClu = (float*)malloc(numClusters * sizeof(float));
+		for (i=0; i<numClusters; i++) {
+			xClu[i] = clusters[i][0];
+			yClu[i] = clusters[i][1];
+		}
+		for(i=0; i<numObjs; i++) {
+			xObj[i] = objects[i][0];
+			yObj[i] = objects[i][1];
+		}
+		graph_kmean(xObj, yObj, numObjs, xClu, yClu, numClusters, membership, 1234);
+		free(xObj);
+		free(yObj);
+		free(xClu);
+		free(yClu);
+		free(objects);
+	}
+	
+	/* free memory part 2 */
+	free(clusters);
+	free(membership);
 
     return(0);
 }

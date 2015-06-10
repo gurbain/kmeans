@@ -43,10 +43,10 @@ DFLAGS      =
 OPTFLAGS    = -O -NDEBUG
 OPTFLAGS    = -g -pg
 INCFLAGS    = -I.
-CFLAGS      = $(OPTFLAGS) $(DFLAGS) $(INCFLAGS) -DBLOCK_SHARED_MEM_OPTIMIZATION=1
-NVCCFLAGS   = $(CFLAGS) --ptxas-options=-v
+CFLAGS      = $(OPTFLAGS) $(DFLAGS) $(INCFLAGS) -std=c99
+NVCCFLAGS   = $(OPTFLAGS) $(DFLAGS) $(INCFLAGS) -DBLOCK_SHARED_MEM_OPTIMIZATION=0  --ptxas-options=-v --gpu-architecture=compute_20 --gpu-code=compute_20
 LDFLAGS     = $(OPTFLAGS)
-LIBS        =
+LIBS        = -lgraph -lX11
 
 # please check the compile to the one you use and the openmp flag
 # Here, I am using gcc and its openmp compile flag is -fopenmp
@@ -101,7 +101,8 @@ mpi_main: $(MPI_OBJ) $(H_FILES)
 SEQ_SRC     = seq_main.c   \
               seq_kmeans.c \
 	      file_io.c    \
-	      wtime.c
+	      wtime.c      \
+	      display.c
 
 SEQ_OBJ     = $(SEQ_SRC:%.c=%.o)
 
@@ -109,7 +110,7 @@ $(SEQ_OBJ): $(H_FILES)
 
 seq: seq_main
 seq_main: $(SEQ_OBJ) $(H_FILES)
-	$(CC) $(LDFLAGS) -o seq_main $(SEQ_OBJ) $(LIBS)
+	$(CC) $(LDFLAGS)  -o seq_main $(SEQ_OBJ) $(LIBS)
 
 # ------------------------------------------------------------------------------
 # CUDA Version
@@ -117,7 +118,7 @@ seq_main: $(SEQ_OBJ) $(H_FILES)
 %.o : %.cu
 	$(NVCC) $(NVCCFLAGS) -o $@ -c $<
 
-CUDA_C_SRC = cuda_main.cu cuda_io.cu cuda_wtime.cu
+CUDA_C_SRC = cuda_main.cu cuda_io.cu cuda_wtime.cu cuda_display.cu
 CUDA_CU_SRC = cuda_kmeans.cu
 
 CUDA_C_OBJ = $(CUDA_C_SRC:%.cu=%.o)
@@ -125,7 +126,7 @@ CUDA_CU_OBJ = $(CUDA_CU_SRC:%.cu=%.o)
 
 cuda: cuda_main
 cuda_main: $(CUDA_C_OBJ) $(CUDA_CU_OBJ)
-	$(NVCC) $(LDFLAGS) -o $@ $(CUDA_C_OBJ) $(CUDA_CU_OBJ)
+	$(NVCC) $(LDFLAGS) -o $@ $(CUDA_C_OBJ) $(CUDA_CU_OBJ) $(LIBS)
 
 #---------------------------------------------------------------------
 clean:

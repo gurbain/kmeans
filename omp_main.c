@@ -22,7 +22,7 @@
 #include <sys/types.h>  /* open() */
 #include <sys/stat.h>
 #include <fcntl.h>
-#include <unistd.h>     /* getopt() */
+#include <getopt.h>
 
 #include <omp.h>
 int      _debug;
@@ -106,7 +106,9 @@ int main(int argc, char **argv) {
     if (is_output_timing) io_timing = omp_get_wtime();
 
     /* read data points from file ------------------------------------------*/
-    objects = file_read(isBinaryFile, filename, &numObjs, &numCoords);
+    file_read_head(isBinaryFile, filename, &numObjs, &numCoords);
+	objects = file_read_block(isBinaryFile, filename, numObjs, numCoords);
+	file_read_close(isBinaryFile);
     if (objects == NULL) exit(1);
 
     if (is_output_timing) {
@@ -138,6 +140,11 @@ int main(int argc, char **argv) {
     free(clusters[0]);
     free(clusters);
 
+	/*- wait for key to continue (added to use pidstat with interruption for benchmarking -*/
+	char buff;
+	printf("\nProcess finished. Press ENTER to continue");
+	scanf("%c", &buff);
+	
     /*---- output performance numbers ---------------------------------------*/
     if (is_output_timing) {
         io_timing += omp_get_wtime() - timing;

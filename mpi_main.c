@@ -22,7 +22,7 @@
 #include <sys/types.h>  /* open() */
 #include <sys/stat.h>
 #include <fcntl.h>
-#include <unistd.h>     /* getopt() */
+#include <getopt.h>
 
 #include <mpi.h>
 int      _debug;

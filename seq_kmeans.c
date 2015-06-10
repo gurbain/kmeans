@@ -66,6 +66,7 @@ float euclid_dist_2(int    numdims,  /* no. dimensions */
 __inline static
 int find_nearest_cluster(int     numClusters, /* no. clusters */
                          int     numCoords,   /* no. coordinates */
+						 float  *distance,    /* to save distance for stats */
                          float  *object,      /* [numCoords] */
                          float **clusters)    /* [numClusters][numCoords] */
 {
@@ -84,6 +85,7 @@ int find_nearest_cluster(int     numClusters, /* no. clusters */
             index    = i;
         }
     }
+    *distance = min_dist;
     return(index);
 }
 
@@ -93,6 +95,7 @@ float** seq_kmeans(float **objects,      /* in: [numObjs][numCoords] */
                    int     numCoords,    /* no. features */
                    int     numObjs,      /* no. objects */
                    int     numClusters,  /* no. clusters */
+				   float **clustersInit, /* init value for cluster */
                    float   threshold,    /* % objects change membership */
                    int    *membership,   /* out: [numObjs] */
                    int    *loop_iterations)
@@ -113,13 +116,10 @@ float** seq_kmeans(float **objects,      /* in: [numObjs][numCoords] */
     for (i=1; i<numClusters; i++)
         clusters[i] = clusters[i-1] + numCoords;
 
-    /* pick first numClusters elements of objects[] as initial cluster centers*/
+    /* pick random numClusters elements of objects[] as initial cluster centers*/
     for (i=0; i<numClusters; i++)
         for (j=0; j<numCoords; j++)
-            clusters[i][j] = objects[i][j];
-
-    /* initialize membership[] */
-    for (i=0; i<numObjs; i++) membership[i] = -1;
+            clusters[i][j] = clustersInit[i][j];
 
     /* need to initialize newClusterSize and newClusters[0] to all 0 */
     newClusterSize = (int*) calloc(numClusters, sizeof(int));
@@ -132,12 +132,16 @@ float** seq_kmeans(float **objects,      /* in: [numObjs][numCoords] */
     for (i=1; i<numClusters; i++)
         newClusters[i] = newClusters[i-1] + numCoords;
 
+	/* initialize dist */
+	float* dist = (float*) malloc(numObjs * sizeof(float));
+	float totalDistance = 0.0;
+	
     do {
         delta = 0.0;
         for (i=0; i<numObjs; i++) {
             /* find the array index of nestest cluster center */
-            index = find_nearest_cluster(numClusters, numCoords, objects[i],
-                                         clusters);
+            index = find_nearest_cluster(numClusters, numCoords, &dist[i],
+										 objects[i], clusters);
 
             /* if membership changes, increase delta by 1 */
             if (membership[i] != index) delta += 1.0;
@@ -160,16 +164,24 @@ float** seq_kmeans(float **objects,      /* in: [numObjs][numCoords] */
             }
             newClusterSize[i] = 0;   /* set back to 0 */
         }
-            
+        
+        /* compute total distance and display results*/
+		totalDistance = 0.0;
+		for (i=0; i<numObjs; i++)
+			totalDistance += dist[i];
         delta /= numObjs;
+		if (_debug)
+			printf("Total distance = %f delta = %.3f\n", totalDistance, delta);
+		
     } while (delta > threshold && loop++ < 500);
-
+	
     *loop_iterations = loop + 1;
 
     free(newClusters[0]);
     free(newClusters);
     free(newClusterSize);
-
+	free(dist);
+	
     return clusters;
 }
 
