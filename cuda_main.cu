@@ -59,7 +59,9 @@ static void usage(char *argv0, float threshold) {
         "       -n num_clusters: number of clusters (K must > 1)\n"
         "       -t threshold   : threshold value (default %.4f)\n"
 		"       -s splitNumber : split the data into s block (default 1)\n"
+		"		-S             : save temp results in case of interruption (default no)\n"
 		"       -g             : display clustered data graph (default no)\n"
+		"       -h             : display help\n"
         "       -o             : output timing results (default no)\n"
         "       -d             : enable debug mode\n";
     fprintf(stderr, help, argv0, threshold);
@@ -74,6 +76,7 @@ int main(int argc, char **argv) {
            int     i, j;
            int     isBinaryFile, is_output_timing;
 		   int     graph;
+		   int     save;
 
            int     numClusters, numCoords, numObjs;
            int    *membership;    /* [numObjs] */
@@ -92,6 +95,7 @@ int main(int argc, char **argv) {
 
     /* some default values */
     _debug           = 0;
+	save 			 = 0;
 	graph			 = 0;
     threshold        = 0.001;
 	splitNumber		 = 1;
@@ -100,7 +104,7 @@ int main(int argc, char **argv) {
     is_output_timing = 0;
     filename         = NULL;
 
-    while ( (opt=getopt(argc,argv,"p:i:l:n:s:t:abdgo"))!= EOF) {
+    while ( (opt=getopt(argc,argv,"p:i:l:n:s:t:abdghoS"))!= EOF) {
         switch (opt) {
             case 'i': filename=optarg;
                       break;
@@ -118,6 +122,10 @@ int main(int argc, char **argv) {
                       break;
 			case 'g': graph = 1;
 					  break;
+			case 'S': save = 1;
+					  break;
+			case 'h': usage(argv[0], threshold);
+                      break;
             case '?': usage(argv[0], threshold);
                       break;
             default: usage(argv[0], threshold);
@@ -173,10 +181,7 @@ int main(int argc, char **argv) {
 			objects = file_read_block(isBinaryFile, filename, numObjsIteration, numCoords);
 		if (objects == NULL)
 			exit(1);
-		//memcpy(&objects[0][0], &objects[iteration * numObjsIteration][0],
-				//numObjsIteration * numCoords * sizeof(float));
 		
-	
 		// do clusterisation
 		clusters = cuda_kmeans(objects, numCoords, numObjsIteration, numClusters,
 				clustersInit, threshold, membershipIteration, &loop_iterations);
@@ -185,6 +190,14 @@ int main(int argc, char **argv) {
 		memcpy(&membership[iteration * numObjsIteration], &membershipIteration[0],
 				numObjsIteration * sizeof(int));
 		clustersInit = clusters;
+		
+		// Save in case of interruption
+		if (save) {
+			char  tmpFilename[512];
+			sprintf(tmpFilename, "%s.tmp-%i", filename, iteration+1);
+			file_write(tmpFilename, numClusters, numObjs, numCoords, clusters,
+				membership);
+		}
 		
 		iteration++;
 	};

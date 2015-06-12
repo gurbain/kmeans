@@ -64,8 +64,10 @@ NVCC        = nvcc
 H_FILES     = kmeans.h
 
 #------   OpenMP version -----------------------------------------
-OMP_SRC     = omp_main.c \
-	      omp_kmeans.c
+OMP_SRC     = omp_main.c 	\
+	      omp_kmeans.c	\
+	      wtime.c      	\
+	      display.c
 
 OMP_OBJ     = $(OMP_SRC:%.c=%.o)
 
@@ -80,7 +82,9 @@ omp_main: $(OMP_OBJ) file_io.o
 MPI_SRC     = mpi_main.c   \
               mpi_kmeans.c \
               mpi_io.c     \
-	      file_io.c
+              file_io.c    \
+	      wtime.c      \
+	      display.c
 
 MPI_OBJ     = $(MPI_SRC:%.c=%.o)
 
@@ -99,8 +103,8 @@ mpi_main: $(MPI_OBJ) $(H_FILES)
 
 #------   sequential version -----------------------------------------
 SEQ_SRC     = seq_main.c   \
-              seq_kmeans.c \
-	      file_io.c    \
+              seq_kmeans.c     \
+	      file_io.c	   \
 	      wtime.c      \
 	      display.c
 

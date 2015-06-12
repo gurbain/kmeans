@@ -64,7 +64,7 @@ inline void checkLastCudaError() {
 }
 #endif
 
-float** omp_kmeans(int, float**, int, int, int, float, int*);
+float** omp_kmeans(int, float**, int, int, int, float **, float, int*, int*);
 float** seq_kmeans(float**, int, int, int, float **, float, int*, int*);
 float** cuda_kmeans(float**, int, int, int, float **, float, int*, int*);
 

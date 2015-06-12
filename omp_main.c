@@ -1,5 +1,5 @@
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
-/*   File:         omp_main.c   (an OpenMP version)                          */
+/*   File:         omp_main.c   (a omp version)                            */
 /*   Description:  This program shows an example on how to call a subroutine */
 /*                 that implements a simple k-means clustering algorithm     */
 /*                 based on Euclid distance.                                 */
@@ -16,6 +16,29 @@
 /*                                                                           */
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
 
+// Copyright (c) 2005 Wei-keng Liao
+// Copyright (c) 2011 Serban Giuroiu
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
+// -----------------------------------------------------------------------------
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>     /* strtok() */
@@ -24,7 +47,6 @@
 #include <fcntl.h>
 #include <getopt.h>
 
-#include <omp.h>
 int      _debug;
 #include "kmeans.h"
 
@@ -36,10 +58,14 @@ static void usage(char *argv0, float threshold) {
         "       -b             : input file is in binary format (default no)\n"
         "       -n num_clusters: number of clusters (K must > 1)\n"
         "       -t threshold   : threshold value (default %.4f)\n"
-        "       -p nproc       : number of threads (default system allocated)\n"
-        "       -a             : perform atomic OpenMP pragma (default no)\n"
+		"       -s splitNumber : split the data into s block (default 1)\n"
+		"		-S             : save temp results in case of interruption (default no)\n"
+		"       -g             : display clustered data graph (default no)\n"
+		"       -h             : display help\n"
         "       -o             : output timing results (default no)\n"
-        "       -d             : enable debug mode\n";
+        "       -d             : enable debug mode\n"
+		"       -a             : perform atomic OpenMP pragma (default no)\n"
+		"       -p nproc       : number of threads (default system allocated)\n";
     fprintf(stderr, help, argv0, threshold);
     exit(-1);
 }
@@ -50,44 +76,63 @@ int main(int argc, char **argv) {
     extern char   *optarg;
     extern int     optind;
            int     i, j, nthreads;
-           int     isBinaryFile, is_perform_atomic, is_output_timing;
+           int     isBinaryFile, is_output_timing, is_perform_atomic;
+		   int     graph;
+		   int     save;
 
            int     numClusters, numCoords, numObjs;
            int    *membership;    /* [numObjs] */
            char   *filename;
-           float **objects;       /* [numObjs][numCoords] data objects */
+           float **objects; 
            float **clusters;      /* [numClusters][numCoords] cluster center */
            float   threshold;
            double  timing, io_timing, clustering_timing;
+           int     loop_iterations;
+		   
+		   int     splitNumber;
+		   int     iteration;
+		   float **clustersInit;
+		   int    *membershipIteration;
+		   int     lastObjsIteration;
 
     /* some default values */
-    _debug            = 0;
-    nthreads          = 0;
-    numClusters       = 0;
-    threshold         = 0.001;
-    numClusters       = 0;
-    isBinaryFile      = 0;
-    is_output_timing  = 0;
+    _debug           = 0;
+	save 			 = 0;
+	graph			 = 0;
+    threshold        = 0.001;
+	splitNumber		 = 1;
+    numClusters      = 0;
+    isBinaryFile     = 0;
+    is_output_timing = 0;
+	nthreads          = 0;
     is_perform_atomic = 0;
-    filename          = NULL;
+    filename         = NULL;
 
-    while ( (opt=getopt(argc,argv,"p:i:n:t:abdo"))!= EOF) {
+    while ( (opt=getopt(argc,argv,"p:i:l:n:s:t:abdghoS"))!= EOF) {
         switch (opt) {
             case 'i': filename=optarg;
                       break;
             case 'b': isBinaryFile = 1;
                       break;
-            case 't': threshold=atof(optarg);
+            case 't': threshold = atof(optarg);
                       break;
+			case 's': splitNumber = atoi(optarg);
+					  break;
             case 'n': numClusters = atoi(optarg);
                       break;
-            case 'p': nthreads = atoi(optarg);
-                      break;
-            case 'a': is_perform_atomic = 1;
-                      break;
+			case 'p': nthreads = atoi (optarg);
+					  break;
             case 'o': is_output_timing = 1;
                       break;
+			case 'a': is_perform_atomic = 1;
+                      break;
             case 'd': _debug = 1;
+                      break;
+			case 'g': graph = 1;
+					  break;
+			case 'S': save = 1;
+					  break;
+			case 'h': usage(argv[0], threshold);
                       break;
             case '?': usage(argv[0], threshold);
                       break;
@@ -98,74 +143,161 @@ int main(int argc, char **argv) {
 
     if (filename == 0 || numClusters <= 1) usage(argv[0], threshold);
 
-    /* set the no. threads if specified in command line, else use all
-       threads allocated by run-time system */
+    if (is_output_timing) io_timing = wtime();
+	
+	/* set the no. threads if specified in command line, else use all
+	   threads allocated by run-time system */
     if (nthreads > 0)
         omp_set_num_threads(nthreads);
 
-    if (is_output_timing) io_timing = omp_get_wtime();
-
     /* read data points from file ------------------------------------------*/
     file_read_head(isBinaryFile, filename, &numObjs, &numCoords);
-	objects = file_read_block(isBinaryFile, filename, numObjs, numCoords);
-	file_read_close(isBinaryFile);
-    if (objects == NULL) exit(1);
 
-    if (is_output_timing) {
-        timing            = omp_get_wtime();
-        io_timing         = timing - io_timing;
-        clustering_timing = timing;
-    }      
-
-    /* start the core computation -------------------------------------------*/
     /* membership: the cluster id for each data object */
     membership = (int*) malloc(numObjs * sizeof(int));
     assert(membership != NULL);
+	
+    /* initialize membership[] */
+    for (i=0; i<numObjs; i++) membership[i] = -1;
+	
+	/* initialize some other algorithm variables */
+	int numObjsIteration = numObjs / splitNumber;
+	malloc2D(objects, numObjsIteration, numCoords, float);
+    assert(objects != NULL);
+	malloc2D(clustersInit, numClusters, numCoords, float);
+    assert(clustersInit != NULL);
+	membershipIteration = (int*) malloc(numObjsIteration * sizeof(int));
+    assert(membershipIteration != NULL);
 
-    clusters = omp_kmeans(is_perform_atomic, objects, numCoords, numObjs,
-                          numClusters, threshold, membership);
+    /* start the timer for the core computation -----------------------------*/
+	if (is_output_timing) {
+        timing            = wtime();
+        io_timing         = timing - io_timing;
+        clustering_timing = timing;
+    }
+		
+	/* initialize the cluster vector with random value */
+	objects = file_read_block(isBinaryFile, filename, numObjsIteration, numCoords);
+	for (i=0; i<numClusters; i++)
+        for (j=0; j<numCoords; j++)
+            clustersInit[i][j] = objects[rand()%numObjsIteration][rand()%numCoords];
 
-    free(objects[0]);
-    free(objects);
+	
+	/* data splitting to accelerate the process and minimize memory usage ---*/
+	iteration = 0;
+	while ( (iteration * numObjsIteration) < (numObjs - numObjsIteration) ) {
+		printf ("\n[omp kmean] data block %i - number of objects %i\n", 
+				iteration + 1, numObjsIteration);
+		
+		// read data to clusterize
+		if (iteration != 0)
+			objects = file_read_block(isBinaryFile, filename, numObjsIteration, numCoords);
+		if (objects == NULL)
+			exit(1);
+		
+		// do clusterisation
+		clusters = omp_kmeans(is_perform_atomic, objects, numCoords, numObjsIteration, numClusters,
+				clustersInit, threshold, membershipIteration, &loop_iterations);
+		
+		// save the results
+		memcpy(&membership[iteration * numObjsIteration], &membershipIteration[0],
+				numObjsIteration * sizeof(int));
+		clustersInit = clusters;
+		
+		// Save in case of interruption
+		if (save) {
+			char  tmpFilename[512];
+			sprintf(tmpFilename, "%s.tmp-%i", filename, iteration+1);
+			file_write(tmpFilename, numClusters, numObjs, numCoords, clusters,
+				membership);
+		}
+		
+		iteration++;
+	};
+	
+	/* last iteration -----------------------------------------------------*/
+	lastObjsIteration = numObjs - numObjsIteration * iteration;
+	printf ("\n[omp kmean] data block %i - number of objects %i\n", 
+				iteration + 1, lastObjsIteration);
+	if (iteration != 0)
+		objects = file_read_block(isBinaryFile, filename, lastObjsIteration, numCoords);
+	if (objects == NULL)
+		exit(1);
 
-    if (is_output_timing) {
-        timing            = omp_get_wtime();
+	clusters = omp_kmeans(is_perform_atomic, objects, numCoords, lastObjsIteration, numClusters,
+			clustersInit, threshold, membershipIteration, &loop_iterations);
+	memcpy(&membership[iteration * numObjsIteration], &membershipIteration[0],
+			lastObjsIteration * sizeof(int));
+	
+	
+	/* restart io timer ----------------------------------------------------*/
+	if (is_output_timing) {
+        timing            = wtime();
         clustering_timing = timing - clustering_timing;
-    }       
+    }
+
+	/* free memory part 1 --------------------------------------------------*/
+	file_read_close(isBinaryFile);
+	free(objects);
+	free(clustersInit);
+	free(membershipIteration);
 
     /* output: the coordinates of the cluster centres ----------------------*/
-    file_write(filename, numClusters, numObjs, numCoords, clusters, membership);
+    file_write(filename, numClusters, numObjs, numCoords, clusters,
+               membership);
 
-    free(membership);
-    free(clusters[0]);
-    free(clusters);
-
-	/*- wait for key to continue (added to use pidstat with interruption for benchmarking -*/
+	/*- wait for key to continue -------------------------------------------*/
 	char buff;
-	printf("\nProcess finished. Press ENTER to continue");
+	printf("\n[omp kmean] Process finished. Press ENTER to continue");
 	scanf("%c", &buff);
 	
-    /*---- output performance numbers ---------------------------------------*/
+	/*---- output performance numbers --------------------------------------*/
     if (is_output_timing) {
-        io_timing += omp_get_wtime() - timing;
+        io_timing += wtime() - timing;
+        printf("\n[omp kmean] Performances results for omp k-mean\n");
 
-        printf("\nPerforming **** Regular Kmeans  (OpenMP) ----");
-        if (is_perform_atomic)
-            printf(" using atomic pragma ******\n");
-        else
-            printf(" using array reduction ******\n");
-
-        printf("Number of threads = %d\n", omp_get_max_threads());
-        printf("Input file:     %s\n", filename);
+		printf("------------------------------------------\n");
+        printf("input file:     %s\n", filename);
         printf("numObjs       = %d\n", numObjs);
         printf("numCoords     = %d\n", numCoords);
         printf("numClusters   = %d\n", numClusters);
         printf("threshold     = %.4f\n", threshold);
+		printf("number of blocks    = %d\n", splitNumber);
+        printf("loop iterations for last block    = %d\n\n", loop_iterations);
 
         printf("I/O time           = %10.4f sec\n", io_timing);
-        printf("Computation timing = %10.4f sec\n", clustering_timing);
+        printf("computation timing = %10.4f sec\n", clustering_timing);
+		printf("------------------------------------------\n\n");
     }
+    
+	/* display results if needed --------------------------------------------*/
+	if (graph) {
+		file_read_head(isBinaryFile, filename, &numObjs, &numCoords);
+		objects = file_read_block(isBinaryFile, filename, numObjs, numCoords);
+		file_read_close(isBinaryFile);
+		float* xObj = (float*)malloc(numObjs * sizeof(float));
+		float* yObj = (float*)malloc(numObjs * sizeof(float));
+		float* xClu = (float*)malloc(numClusters * sizeof(float));
+		float* yClu = (float*)malloc(numClusters * sizeof(float));
+		for (i=0; i<numClusters; i++) {
+			xClu[i] = clusters[i][0];
+			yClu[i] = clusters[i][1];
+		}
+		for(i=0; i<numObjs; i++) {
+			xObj[i] = objects[i][0];
+			yObj[i] = objects[i][1];
+		}
+		graph_kmean(xObj, yObj, numObjs, xClu, yClu, numClusters, membership, 1234);
+		free(xObj);
+		free(yObj);
+		free(xClu);
+		free(yClu);
+		free(objects);
+	}
+	
+	/* free memory part 2 */
+	free(clusters);
+	free(membership);
 
     return(0);
 }
-

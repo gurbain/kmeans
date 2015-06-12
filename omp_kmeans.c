@@ -44,6 +44,7 @@ float euclid_dist_2(int    numdims,  /* no. dimensions */
 __inline static
 int find_nearest_cluster(int     numClusters, /* no. clusters */
                          int     numCoords,   /* no. coordinates */
+						 float  *distance,
                          float  *object,      /* [numCoords] */
                          float **clusters)    /* [numClusters][numCoords] */
 {
@@ -62,6 +63,7 @@ int find_nearest_cluster(int     numClusters, /* no. clusters */
             index    = i;
         }
     }
+    *distance = min_dist;
     return(index);
 }
 
@@ -73,10 +75,11 @@ float** omp_kmeans(int     is_perform_atomic, /* in: */
                    int     numCoords,         /* no. coordinates */
                    int     numObjs,           /* no. objects */
                    int     numClusters,       /* no. clusters */
+				   float **clustersInit,
                    float   threshold,         /* % objects change membership */
-                   int    *membership)        /* out: [numObjs] */
+                   int    *membership,        /* out: [numObjs] */
+				   int    *loop_iterations)
 {
-
     int      i, j, k, index, loop=0;
     int     *newClusterSize; /* [numClusters]: no. objects assigned in each
                                 new cluster */
@@ -100,10 +103,10 @@ float** omp_kmeans(int     is_perform_atomic, /* in: */
     for (i=1; i<numClusters; i++)
         clusters[i] = clusters[i-1] + numCoords;
 
-    /* pick first numClusters elements of objects[] as initial cluster centers*/
+	/* pick clusterInit as initial objects of cluster elements*/
     for (i=0; i<numClusters; i++)
         for (j=0; j<numCoords; j++)
-            clusters[i][j] = objects[i][j];
+            clusters[i][j] = clustersInit[i][j];
 
     /* initialize membership[] */
     for (i=0; i<numObjs; i++) membership[i] = -1;
@@ -118,6 +121,10 @@ float** omp_kmeans(int     is_perform_atomic, /* in: */
     assert(newClusters[0] != NULL);
     for (i=1; i<numClusters; i++)
         newClusters[i] = newClusters[i-1] + numCoords;
+	
+	/* initialize dist */
+	float* dist = (float*) malloc(numObjs * sizeof(float));
+	float totalDistance = 0.0;
 
     if (!is_perform_atomic) {
         /* each thread calculates new centers using a private space,
@@ -161,8 +168,8 @@ float** omp_kmeans(int     is_perform_atomic, /* in: */
                     reduction(+:delta)
             for (i=0; i<numObjs; i++) {
                 /* find the array index of nestest cluster center */
-                index = find_nearest_cluster(numClusters, numCoords, objects[i],
-                                             clusters);
+                index = find_nearest_cluster(numClusters, numCoords, &dist[i],
+						objects[i], clusters);
 
                 /* if membership changes, increase delta by 1 */
                 if (membership[i] != index) delta += 1.0;
@@ -190,8 +197,8 @@ float** omp_kmeans(int     is_perform_atomic, /* in: */
                             reduction(+:delta)
                 for (i=0; i<numObjs; i++) {
                     /* find the array index of nestest cluster center */
-                    index = find_nearest_cluster(numClusters, numCoords,
-                                                 objects[i], clusters);
+                    index = find_nearest_cluster(numClusters, numCoords, &dist[i],
+						objects[i], clusters);
 
                     /* if membership changes, increase delta by 1 */
                     if (membership[i] != index) delta += 1.0;
@@ -229,9 +236,18 @@ float** omp_kmeans(int     is_perform_atomic, /* in: */
             }
             newClusterSize[i] = 0;   /* set back to 0 */
         }
-            
+        
+        /* compute total distance and display results*/
+		totalDistance = 0.0;
+		for (i=0; i<numObjs; i++)
+			totalDistance += dist[i];
         delta /= numObjs;
+		if (_debug)
+			printf("Total distance = %f delta = %.3f\n", totalDistance, delta);
+		
     } while (delta > threshold && loop++ < 500);
+	
+	*loop_iterations = loop + 1;
 
     if (_debug) {
         timing = omp_get_wtime() - timing;
