@@ -63,7 +63,7 @@ int find_nearest_cluster(int     numClusters, /* no. clusters */
             index    = i;
         }
     }
-    *distance = min_dist;
+   *distance = min_dist;
     return(index);
 }
 

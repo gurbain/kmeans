@@ -8,6 +8,9 @@
 \#*#
 *~
 
+# KDE
+.directory
+
 # Eclipse
 .project
 .classpath
@@ -20,6 +23,11 @@ cscope.*
 # Development
 *.o
 gmon.out
+cuda_main
+seq_main
+omp_main
+mpi_main
+
 
 # K-Means
 profiles
@@ -27,3 +35,7 @@ profiles
 *.membership
 *.bin
 *.txt
+
+# data
+data
+test
