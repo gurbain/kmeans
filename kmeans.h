@@ -64,16 +64,23 @@ inline void checkLastCudaError() {
 }
 #endif
 
+#define THREADS_PER_BLOCK 512
+#define MAX_ITER 50
+#define DELTA_THRESHOLD 	0.001
+
 float** omp_kmeans(int, float**, int, int, int, float **, float, int*, int*);
 float** seq_kmeans(float**, int, int, int, float **, float, int*, int*);
 float** cuda_kmeans(float**, int, int, int, float **, float, int*, int*);
+
+void cuda_kpp_init(float**, float**, int*, int, int, int);
 
 int 	file_read_head(int, char*, int*, int*);
 float** file_read_block(int, char*, int, int);
 int  	file_read_close(int);
 int     file_write(char*, int, int, int, float**, int*);
 
-int     graph_kmean(float*, float*, int, float*, float*, int, int*, float);
+void    gui_kmean(float*, float*, int, float*, float*, int, int*);
+void    pdf_kmean(float*, float*, int, float*, float*, int, int*);
 double  wtime(void);
 
 extern int _debug;

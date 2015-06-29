@@ -173,7 +173,7 @@ float** seq_kmeans(float **objects,      /* in: [numObjs][numCoords] */
 		if (_debug)
 			printf("Total distance = %f delta = %.3f\n", totalDistance, delta);
 		
-    } while (delta > threshold && loop++ < 500);
+    } while (delta > threshold && loop++ < MAX_ITER);
 	
     *loop_iterations = loop + 1;
 

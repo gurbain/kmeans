@@ -27,6 +27,7 @@ cuda_main
 seq_main
 omp_main
 mpi_main
+libpkmeans.so.1.0
 
 
 # K-Means
@@ -39,3 +40,4 @@ profiles
 # data
 data
 test
+results.eps

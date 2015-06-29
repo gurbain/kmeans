@@ -287,7 +287,7 @@ int main(int argc, char **argv) {
 			xObj[i] = objects[i][0];
 			yObj[i] = objects[i][1];
 		}
-		graph_kmean(xObj, yObj, numObjs, xClu, yClu, numClusters, membership, 1234);
+		pdf_kmean(xObj, yObj, numObjs, xClu, yClu, numClusters, membership);
 		free(xObj);
 		free(yObj);
 		free(xClu);

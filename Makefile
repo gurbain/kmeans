@@ -37,20 +37,22 @@
 
 .KEEP_STATE:
 
-all: seq omp cuda mpi
+all: seq omp cuda mpi lib
 
 DFLAGS      =
 OPTFLAGS    = -O -NDEBUG
 OPTFLAGS    = -g -pg
 INCFLAGS    = -I.
-CFLAGS      = $(OPTFLAGS) $(DFLAGS) $(INCFLAGS) -std=c99
-NVCCFLAGS   = $(OPTFLAGS) $(DFLAGS) $(INCFLAGS) -DBLOCK_SHARED_MEM_OPTIMIZATION=0  --ptxas-options=-v --gpu-architecture=compute_20 --gpu-code=compute_20
+CFLAGS      = $(OPTFLAGS) $(DFLAGS) $(INCFLAGS) -std=c99 -fPIC
+NVCCFLAGS   = $(OPTFLAGS) $(DFLAGS) $(INCFLAGS) -DBLOCK_SHARED_MEM_OPTIMIZATION=0  --ptxas-options=-v --gpu-architecture=compute_20 --gpu-code=compute_20 --compiler-options '-fPIC'
 LDFLAGS     = $(OPTFLAGS)
-LIBS        = -lgraph -lX11
+LIBS        =  
+#-lgraph -lX11 -L/usr/local/cuda/lib64  -lcudart
+NVCCLDFLAGS = --compiler-options '-fPIC -fopenmp' -dlink
 
 # please check the compile to the one you use and the openmp flag
 # Here, I am using gcc and its openmp compile flag is -fopenmp
-# If icc is used, please us -opnemp
+# If icc is used, please us -openmp
 #
 OMPFLAGS    = -fopenmp
 
@@ -60,6 +62,7 @@ NVCC        = nvcc
 
 .c.o:
 	$(CC) $(CFLAGS) -c $<
+
 
 H_FILES     = kmeans.h
 
@@ -132,11 +135,52 @@ cuda: cuda_main
 cuda_main: $(CUDA_C_OBJ) $(CUDA_CU_OBJ)
 	$(NVCC) $(LDFLAGS) -o $@ $(CUDA_C_OBJ) $(CUDA_CU_OBJ) $(LIBS)
 
+
+#---------------------------------------------------------------------
+LIB_C_SRC = seq_kmeans.c     	\
+	    omp_kmeans.c	\
+	    file_io.c	   	\
+	    wtime.c      	\
+	    display.c		\
+	    pkmeans.c
+
+LIB_CU_SRC = cuda_io.cu		\
+	    cuda_wtime.cu 	\
+	    cuda_display.cu	\
+	    cuda_kmeans.cu
+	    
+LIB_H = pkmeans.h
+	
+LIB_C_OBJ     = $(LIB_C_SRC:%.c=%.o)
+LIB_CU_OBJ     = $(LIB_CU_SRC:%.cu=%.o)
+
+lib: libpkmeans.so.1.0
+
+link.o: $(LIB_C_OBJ) $(LIB_CU_OBJ)
+	$(NVCC) $(NVCCLDFLAGS) $(LIB_C_OBJ) $(LIB_CU_OBJ) -o $@
+
+libpkmeans.so.1.0 : link.o
+	$(CC) -fopenmp -shared -Wl,-soname,libpkmeans.so.1.0 -o $@   $(LIB_C_OBJ) $(LIB_CU_OBJ) link.o  -L/usr/local/cuda-7.0/lib64/ -lcudart
+
+#---------------------------------------------------------------------
+INSTALL_LIB_DIR=/usr/local
+    
+ln:
+	
+
+install: ln lib
+	install -m 0755 libpkmeans.so.1.0 $(INSTALL_LIB_DIR)/lib/
+	ln -fs $(INSTALL_LIB_DIR)/lib/libpkmeans.so.1.0 $(INSTALL_LIB_DIR)/lib/libpkmeans.so
+	install -m 0755 pkmeans.h $(INSTALL_LIB_DIR)/include/
+	
+
+.PHONY: install
+
 #---------------------------------------------------------------------
 clean:
-	rm -rf *.o omp_main seq_main mpi_main cuda_main \
-	       core* .make.state gmon.out     \
-               *.cluster_centres *.membership \
-               Image_data/*.cluster_centres   \
-               Image_data/*.membership        \
-               profiles/
+	rm -rf *.o *.so omp_main seq_main mpi_main cuda_main \
+		core* .make.state gmon.out     \
+		*.cluster_centres *.membership \
+		Image_data/*.cluster_centres   \
+		Image_data/*.membership        \
+		profiles/

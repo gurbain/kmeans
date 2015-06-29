@@ -46,6 +46,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <getopt.h>
+#include <math.h>
 
 int      _debug;
 #include "kmeans.h"
@@ -55,14 +56,15 @@ static void usage(char *argv0, float threshold) {
     char *help =
         "Usage: %s [switches] -i filename -n num_clusters\n"
         "       -i filename    : file containing data to be clustered\n"
-        "       -b             : input file is in binary format (default no)\n"
+        "       -b             : input file is in binary format (dflt no)\n"
+		"       -p             : init seeding by k++ algo (dflt no)\n"
         "       -n num_clusters: number of clusters (K must > 1)\n"
-        "       -t threshold   : threshold value (default %.4f)\n"
-		"       -s splitNumber : split the data into s block (default 1)\n"
-		"		-S             : save temp results in case of interruption (default no)\n"
-		"       -g             : display clustered data graph (default no)\n"
+        "       -t threshold   : threshold value (dflt %.4f)\n"
+		"       -s splitNumber : split the data into s block (dflt 1)\n"
+		"		-S             : save temp results (dflt no)\n"
+		"       -g             : display clustered data graph (dflt no)\n"
 		"       -h             : display help\n"
-        "       -o             : output timing results (default no)\n"
+        "       -o             : output timing results (dflt no)\n"
         "       -d             : enable debug mode\n";
     fprintf(stderr, help, argv0, threshold);
     exit(-1);
@@ -75,6 +77,7 @@ int main(int argc, char **argv) {
     extern int     optind;
            int     i, j;
            int     isBinaryFile, is_output_timing;
+		   int     iskppInit;
 		   int     graph;
 		   int     save;
 
@@ -99,16 +102,19 @@ int main(int argc, char **argv) {
 	graph			 = 0;
     threshold        = 0.001;
 	splitNumber		 = 1;
+	iskppInit		 = 0;
     numClusters      = 0;
     isBinaryFile     = 0;
     is_output_timing = 0;
     filename         = NULL;
 
-    while ( (opt=getopt(argc,argv,"p:i:l:n:s:t:abdghoS"))!= EOF) {
+    while ( (opt=getopt(argc,argv,"i:l:n:s:t:abdghopS"))!= EOF) {
         switch (opt) {
             case 'i': filename=optarg;
                       break;
             case 'b': isBinaryFile = 1;
+                      break;
+			case 'p': iskppInit = 1;
                       break;
             case 't': threshold = atof(optarg);
                       break;
@@ -163,12 +169,15 @@ int main(int argc, char **argv) {
         clustering_timing = timing;
     }
 		
-	/* initialize the cluster vector with random value */
+	/* initialize the cluster vector with k++ */
 	objects = file_read_block(isBinaryFile, filename, numObjsIteration, numCoords);
-	for (i=0; i<numClusters; i++)
-        for (j=0; j<numCoords; j++)
-            clustersInit[i][j] = objects[rand()%numObjsIteration][rand()%numCoords];
-
+	if (iskppInit) {
+		cuda_kpp_init(objects, clustersInit, membership, numObjsIteration, numCoords, numClusters);
+	} else {
+		for (i=0; i<numClusters; i++)
+			for (j=0; j<numCoords; j++)
+				clustersInit[i][j] = objects[rand()%numObjsIteration][rand()%numCoords];
+	}
 	
 	/* data splitting to accelerate the process and minimize memory usage ---*/
 	iteration = 0;
@@ -274,7 +283,7 @@ int main(int argc, char **argv) {
 			xObj[i] = objects[i][0];
 			yObj[i] = objects[i][1];
 		}
-		graph_kmean(xObj, yObj, numObjs, xClu, yClu, numClusters, membership, 1234);
+		pdf_kmean(xObj, yObj, numObjs, xClu, yClu, numClusters, membership);
 		free(xObj);
 		free(yObj);
 		free(xClu);

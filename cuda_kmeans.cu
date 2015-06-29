@@ -42,6 +42,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 
 #include "kmeans.h"
 
@@ -344,3 +345,88 @@ float** cuda_kmeans(float **objects,      /* in: [numObjs][numCoords] */
     return clusters;
 }
 
+
+
+/* 
+ * Sequential initialization with k++
+ */
+
+double randf(double m)
+{
+	return m * rand() / (RAND_MAX - 1.);
+}
+
+__inline static
+float euclid_dist_2_seq(int    numdims,  /* no. dimensions */
+                    float *coord1,   /* [numdims] */
+                    float *coord2)   /* [numdims] */
+{
+    int i;
+    float ans=0.0;
+
+    for (i=0; i<numdims; i++)
+        ans += (coord1[i]-coord2[i]) * (coord1[i]-coord2[i]);
+
+    return(ans);
+}
+
+__inline static
+int find_nearest_cluster_seq(int     numClusters, /* no. clusters */
+                         int     numCoords,   /* no. coordinates */
+						 float  *distance,    /* to save distance for stats */
+                         float  *object,      /* [numCoords] */
+                         float **clusters)    /* [numClusters][numCoords] */
+{
+    int   index, i;
+    float dist, min_dist;
+
+    /* find the cluster id that has min distance to object */
+    index    = 0;
+    min_dist = euclid_dist_2_seq(numCoords, object, clusters[0]);
+
+    for (i=1; i<numClusters; i++) {
+        dist = euclid_dist_2_seq(numCoords, object, clusters[i]);
+        /* no need square root */
+        if (dist < min_dist) { /* find the min and its array index */
+            min_dist = dist;
+            index    = i;
+        }
+    }
+    *distance = min_dist;
+    return(index);
+}
+
+void cuda_kpp_init(float** objects, 
+			  float** clustersInit, 
+			  int* membership, 
+			  int numObjs, 
+			  int numCoords, 
+			  int numClusters)
+{
+	int i, j, k;
+	float sum;
+	float *d = (float*)malloc(sizeof(float) * numObjs);
+ 
+	if (_debug) printf("[cuda kmean] Kpp initialization method\n");
+	for (i=0; i<numClusters; i++)
+        for (j=0; j<numCoords; j++)
+            clustersInit[i][j] = objects[rand()%numObjs][j];
+
+	for (i=1; i<numClusters; i++) {
+		sum = 0;
+		for (j= 0; j<numObjs; j++) {
+			find_nearest_cluster_seq(numClusters, numCoords, d+j,
+				objects[j], clustersInit);
+			sum += d[j];
+		}
+		sum = randf(sum);
+		for (j=0; j<numObjs; j++) {
+			if ((sum -= d[j]) > 0) continue;
+			for (k=0; k<numCoords; k++)
+				clustersInit[i][k] = objects[j][k];
+			break;
+		}
+		if (_debug) printf("Fill cluster %i\n", i+1);
+	}
+	free(d);
+}
